@@ -11,13 +11,15 @@ import (
 	"strconv"
 	"strings"
 
+	// Import Cloud Server & Plantform
+	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/storage"
-	"github.com/pborman/uuid"
 	elastic "gopkg.in/olivere/elastic.v3"
 
 	"github.com/auth0/go-jwt-middleware"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
+	"github.com/pborman/uuid"
 )
 
 type Location struct {
@@ -36,12 +38,16 @@ const (
 	INDEX    = "around"
 	TYPE     = "post"
 	DISTANCE = "200km"
-	// Needs to update
-	//PROJECT_ID = "around-xxx"
-	//BT_INSTANCE = "around-post"
+
+	// Use to find BigTable instance
+	PROJECT_ID  = "around-264500"
+	BT_INSTANCE = "around-post"
+
 	// Needs to update this URL if you deploy it to cloud.
+	// Use to deploy ElasticSearch on GCE
 	ES_URL = "http://35.232.83.97:9200"
 
+	// Use to find GCS instance (Google Cloud Storage)
 	BUCKET_NAME = "post-images-264500"
 )
 
@@ -156,7 +162,7 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
-	// replace it with your real bucket name.
+	// replace it with your real bucket name (in Const).
 	_, attrs, err := saveToGCS(ctx, file, BUCKET_NAME, id)
 	if err != nil {
 		http.Error(w, "GCS is not setup", http.StatusInternalServerError)
@@ -169,9 +175,13 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 
 	// Save to ES.
 	saveToES(p, id)
+
+	// Save to BigTable.
+	saveToBigTable(p, id)
+
 }
 
-//***************  Save a post to Google Cloud Storage ***************************
+//***************  Save a Post to Google Cloud Storage (GCS) ***************************
 func saveToGCS(ctx context.Context, r io.Reader, bucketName, name string) (*storage.ObjectHandle, *storage.ObjectAttrs, error) {
 	// create a client
 	client, err := storage.NewClient(ctx)
@@ -204,7 +214,33 @@ func saveToGCS(ctx context.Context, r io.Reader, bucketName, name string) (*stor
 	return obj, attrs, err
 }
 
-//***************  Save a post to ElasticSearch ***************************
+//***************  Save a Post to BigTable ***************************
+func saveToBigTable(p *Post, id string) {
+	ctx := context.Background()
+	// you must update project name here
+	bt_client, err := bigtable.NewClient(ctx, PROJECT_ID, BT_INSTANCE)
+	if err != nil {
+		panic(err)
+	}
+
+	tbl := bt_client.Open("post")
+	mut := bigtable.NewMutation()
+	t := bigtable.Now()
+
+	mut.Set("post", "user", t, []byte(p.User))
+	mut.Set("post", "message", t, []byte(p.Message))
+	mut.Set("location", "lat", t, []byte(strconv.FormatFloat(p.Location.Lat, 'f', -1, 64)))
+	mut.Set("location", "lon", t, []byte(strconv.FormatFloat(p.Location.Lon, 'f', -1, 64)))
+
+	err = tbl.Apply(ctx, id, mut)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Post is saved to BigTable: %s\n", p.Message)
+
+}
+
+//***************  Save a Post to ElasticSearch ***************************
 func saveToES(p *Post, id string) {
 	// Create a client
 	es_client, err := elastic.NewClient(elastic.SetURL(ES_URL), elastic.SetSniff(false))
