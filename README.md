@@ -1,6 +1,6 @@
 # mini-socialNetwork
 
-1. This app is based on **Golan** and **Google Cloud Service**.
+1. This app is based on **Golang** and **Google Cloud Service**.
 
 2. Function:
    * `Post` with a message / picture / video
